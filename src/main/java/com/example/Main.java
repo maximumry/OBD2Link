@@ -18,6 +18,7 @@ public class Main {
         try{
             byte[] buffer = new byte[1024];
             int numRead = port.getInputStream().read(buffer);
+            System.out.print(numRead);
         }catch(Exception e){
             e.printStackTrace();
         }finally {
