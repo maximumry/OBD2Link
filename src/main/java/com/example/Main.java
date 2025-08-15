@@ -1,4 +1,5 @@
 package com.example;
+import com.fazecast.jSerialComm.*;
 
 //TIP コードを<b>実行</b>するには、<shortcut actionId="Run"/> を押すか
 // ガターの <icon src="AllIcons.Actions.Execute"/> アイコンをクリックします。
@@ -12,6 +13,25 @@ public class Main {
             //TIP <shortcut actionId="Debug"/> を押してコードのデバッグを開始します。<icon src="AllIcons.Debugger.Db_set_breakpoint"/> ブレークポイントを 1 つ設定しましたが、
             // <shortcut actionId="ToggleLineBreakpoint"/> を押すといつでも他のブレークポイントを追加できます。
             System.out.println("i = " + i);
+        }
+
+        SerialPort port = SerialPort.getCommPort("COM1");
+        port.setBaudRate(9600);
+
+        if(port.openPort()){
+            System.out.print("ポート開きました");
+        }else{
+            System.out.println("ポートが開けませんでした");
+        }
+
+        try{
+            byte[] buffer = new byte[1024];
+            int numRead = port.getInputStream().read(buffer);
+        }catch(Exception e){
+            e.printStackTrace();
+        }finally {
+            port.closePort();
+            System.out.println("ポートを閉じました");
         }
     }
 }
