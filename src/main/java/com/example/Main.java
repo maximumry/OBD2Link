@@ -18,6 +18,7 @@ public class Main {
     byte[] portBuffer;
     //OBD2コマンドを定義
     static final String[] ELM327COMMAND = {"ATZ", "ATE0", "ATSP0"};
+
     public static void main(String[] args) {
 
         SerialPort[] ports = SerialPort.getCommPorts();
@@ -53,43 +54,46 @@ public class Main {
             boolean protocolResult = main.sendCommand(port, ELM327COMMAND[2]);
             if(!protocolResult) return;
 
-            //モード01でPIDの0D(車速)を取得
-            byte[] carSpeedResult = main.sendCarCommand(port, "010D");
-            int[] carSpeedInt = new int[carSpeedResult.length];
+            //車両情報を書き込むファイルを抽出してオブジェクト生成
+            FileWriter file = new FileWriter(
+                    "/Users/kawaguchiryou/Projects/files/carSpeed.csv"
+            );
+            PrintWriter pw = new PrintWriter(file);
 
-            String byteValue = "";
-            int speedValue = 0;
-            for(int i = 0; i <= carSpeedInt.length; i++){
-                try{
-                    if(i == 0 && carSpeedInt[i] != 41){
-                        return;
-                    } else if (i == 1 && !"0D".equals(carSpeedInt[i])) {
-                        return;
-                    } else if(i == 3){
-                        byteValue = String.valueOf(carSpeedResult[i]);
-                        speedValue = Integer.parseInt(byteValue, 10);
+            Timer time = new Timer();
+            TimerTask task = new TimerTask() {
+                int sendCount = 0;
+                @Override
+                public void run() {
+                    //モード01でPIDの0D(車速)を取得
+                    byte[] carSpeedResult = main.sendCarCommand(port, "010D");
 
-                        FileWriter file = new FileWriter(
-                                "/Users/kawaguchiryou/Projects/files/carSpeed.csv"
-                        );
+                    String byteValue = "";
+                    int speedValue = 0;
+                    try{
+                        if(carSpeedResult != null && carSpeedResult.length != 0){
+                            return;
+                        }
 
-                        PrintWriter pw = new PrintWriter(file);
-                        pw.println(speedValue);
+                        int obd2Mode = Integer.parseInt(String.valueOf(carSpeedResult[0]), 10);
+                        int carSituation = Integer.parseInt(String.valueOf(carSpeedResult[1]), 10);
+                        int carSituationResult = Integer.parseInt(String.valueOf(carSpeedResult[2]), 10);
 
-                        pw.close();
+                        //OBD2モードと送ったPIDが合っているか確認
+                        if(obd2Mode == 41 && carSituation == 13){
+                            //配列最後のデータ(車の情報)をcsvファイルに出力
+                            byteValue = String.valueOf(carSituationResult);
+                            speedValue = Integer.parseInt(byteValue, 10);
+                            pw.println(speedValue);
+                        }
+                    }catch(NullPointerException e){
+                        main.writeErrorMessage(e);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
                     }
-
-                }catch(IOException e){
-                    byteValue = "0";
-                }catch(Exception e){
-                    main.writeErrorMessage(e);
-                }
-
-            }
-
-            byte[] buffer = new byte[1024];
-            int numRead = port.getInputStream().read(buffer);
-            System.out.print(numRead);
+                };
+            };
+            time.scheduleAtFixedRate(task, 10, 100);
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
