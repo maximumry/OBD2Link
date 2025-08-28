@@ -38,40 +38,39 @@ public class Main {
             return;
         }
 
-        try {
+        //try-with-resourcesで事前に書き込み用ファイルを指定
+        try (FileWriter file = new FileWriter(
+                "/Users/kawaguchiryou/Projects/files/carSpeed.csv"
+        )) {
             System.out.println("ポートを開きました。ELM327を初期化します");
 
             //ELM327を初期化
             Main main = new Main();
             boolean resetResult = main.sendCommand(port, ELM327COMMAND[0]);
-            if(!resetResult) return;
+            if (!resetResult) return;
 
             //エコー無効にして送信したコマンドのおうむ返しを防ぐ
             boolean echoResult = main.sendCommand(port, ELM327COMMAND[1]);
-            if(!echoResult) return;
+            if (!echoResult) return;
 
             //ECUとのプロトコル自動設定
             boolean protocolResult = main.sendCommand(port, ELM327COMMAND[2]);
-            if(!protocolResult) return;
+            if (!protocolResult) return;
 
             //車両情報を書き込むファイルを抽出してオブジェクト生成
-            FileWriter file = new FileWriter(
-                    "/Users/kawaguchiryou/Projects/files/carSpeed.csv"
-            );
             PrintWriter pw = new PrintWriter(file);
 
+            //モード01でPIDの0D(車速)を取得
             Timer time = new Timer();
             TimerTask task = new TimerTask() {
-                int sendCount = 0;
                 @Override
                 public void run() {
-                    //モード01でPIDの0D(車速)を取得
                     byte[] carSpeedResult = main.sendCarCommand(port, "010D");
 
                     String byteValue = "";
                     int speedValue = 0;
-                    try{
-                        if(carSpeedResult != null && carSpeedResult.length != 0){
+                    try {
+                        if (carSpeedResult != null && carSpeedResult.length != 0) {
                             return;
                         }
 
@@ -80,21 +79,30 @@ public class Main {
                         int carSituationResult = Integer.parseInt(String.valueOf(carSpeedResult[2]), 10);
 
                         //OBD2モードと送ったPIDが合っているか確認
-                        if(obd2Mode == 41 && carSituation == 13){
+                        if (obd2Mode == 41 && carSituation == 13) {
                             //配列最後のデータ(車の情報)をcsvファイルに出力
                             byteValue = String.valueOf(carSituationResult);
                             speedValue = Integer.parseInt(byteValue, 10);
                             pw.println(speedValue);
                         }
-                    }catch(NullPointerException e){
+                    } catch (NullPointerException e) {
                         main.writeErrorMessage(e);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
-                };
+                }
+
+                ;
             };
             time.scheduleAtFixedRate(task, 10, 100);
+            Thread.sleep(500);
+
+            pw.close();
+        } catch (InterruptedException e){
+            //要修正
+            e.printStackTrace();
         } catch (Exception e) {
+            //要修正
             e.printStackTrace();
         } finally {
             port.closePort();
@@ -110,7 +118,6 @@ public class Main {
         StringBuilder readString = new StringBuilder();
         TimerTask task = new TimerTask(){
             private int executionCount = 0;
-
             @Override
             public void run(){
                 //初期化後">" or "OK"を受け取るための処理
@@ -133,7 +140,12 @@ public class Main {
         };
         timer.scheduleAtFixedRate(task, 10, 1);
 
-        //初期化コマンド送信しても返答がなかった場合の処理
+        try{
+            Thread.sleep(500);
+        }catch (InterruptedException e){
+            return false;
+        }
+
         if(readString.isEmpty()){
             return false;
         }
@@ -176,6 +188,12 @@ public class Main {
             }
         };
         time.scheduleAtFixedRate(task, 10, 1);
+
+        try{
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
 
         String lastStr = portBuffer.toString().substring(portBuffer.length - 1);
         if(lastStr.equals(">")) {
