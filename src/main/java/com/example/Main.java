@@ -94,6 +94,7 @@ public class Main {
                 };
             };
             time.scheduleAtFixedRate(task, 10, 100);
+            pw.close();
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
