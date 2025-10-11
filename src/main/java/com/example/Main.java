@@ -2,15 +2,11 @@ package com.example;
 import com.fazecast.jSerialComm.*;
 
 import java.io.FileWriter;
-import java.io.IOException;
 import java.io.PrintWriter;
-import java.io.Serial;
 import java.nio.charset.StandardCharsets;
-import java.sql.Time;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
-
+import java.util.concurrent.*;
 //TIP コードを<b>実行</b>するには、<shortcut actionId="Run"/> を押すか
 // ガターの <icon src="AllIcons.Actions.Execute"/> アイコンをクリックします。
 public class Main {
@@ -19,7 +15,7 @@ public class Main {
     //OBD2コマンドを定義
     static final String[] ELM327COMMAND = {"ATZ", "ATE0", "ATSP0"};
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
 
         SerialPort[] ports = SerialPort.getCommPorts();
 
@@ -58,50 +54,44 @@ public class Main {
             if (!protocolResult) return;
 
             //車両情報を書き込むファイルを抽出してオブジェクト生成
-            PrintWriter pw = new PrintWriter(file);
+            PrintWriter pw = new PrintWriter(file, true);
 
-            //モード01でPIDの0D(車速)を取得
-            Timer time = new Timer();
-            TimerTask task = new TimerTask() {
-                @Override
-                public void run() {
+            ScheduledExecutorService ses = Executors.newScheduledThreadPool(1);
+            ses.schedule(() -> System.out.println("１回目実行"), 1, TimeUnit.SECONDS);
+
+            ScheduledFuture<?> f1 = ses.scheduleWithFixedDelay(() -> {
+                try{
                     byte[] carSpeedResult = main.sendCarCommand(port, "010D");
-
-                    String byteValue = "";
-                    int speedValue = 0;
-                    try {
-                        if (carSpeedResult != null && carSpeedResult.length != 0) {
-                            return;
-                        }
-
-                        int obd2Mode = Integer.parseInt(String.valueOf(carSpeedResult[0]), 10);
-                        int carSituation = Integer.parseInt(String.valueOf(carSpeedResult[1]), 10);
-                        int carSituationResult = Integer.parseInt(String.valueOf(carSpeedResult[2]), 10);
-
-                        //OBD2モードと送ったPIDが合っているか確認
-                        if (obd2Mode == 41 && carSituation == 13) {
-                            //配列最後のデータ(車の情報)をcsvファイルに出力
-                            byteValue = String.valueOf(carSituationResult);
-                            speedValue = Integer.parseInt(byteValue, 10);
-                            pw.println(speedValue);
-                        }
-                    } catch (NullPointerException e) {
-                        main.writeErrorMessage(e);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
+                    if(carSpeedResult == null || carSpeedResult.length == 0){
+                        return;
                     }
+
+                    String speedStr = new String(carSpeedResult, StandardCharsets.UTF_8)
+                            .replaceAll("[\\r\\n>]", " ")
+                            .trim();
+
+                    //charsetを指定した文字列を空白で区切り、OBD2コマンドごとに抽出
+                    String[] carData = speedStr.split("\\s+");
+                    for (int i = 0; i + 2 < carData.length; i++){
+                        if("41".equals(carData[i]) && "0D".equals(carData[i + 1])){
+                            int speedKmh = Integer.parseInt(carData[i + 2], 16);
+                            pw.println(speedKmh);
+                            break;
+                        }
+                    }
+                }catch(Exception exception){
+                    main.writeErrorMessage(exception);
                 }
+            }, 1, 2, TimeUnit.SECONDS);
 
-                ;
-            };
-            time.scheduleAtFixedRate(task, 10, 100);
-            Thread.sleep(500);
-
-            pw.close();
-        } catch (InterruptedException e){
+            while(port.isOpen()){
+                Thread.sleep(500);
+            }
+            ses.shutdown();
+        } catch (NullPointerException e) {
             //要修正
             e.printStackTrace();
-        } catch (Exception e) {
+        } catch(Exception e){
             //要修正
             e.printStackTrace();
         } finally {
@@ -128,7 +118,7 @@ public class Main {
                 int readResult = port.readBytes(readBuffer, readBuffer.length);
                 if(readResult == -1) return;
 
-                String responseBuffer = new String(readBuffer);
+                String responseBuffer = new String(readBuffer, StandardCharsets.UTF_8);
                 readString.append(responseBuffer);
 
                 //500msかかって返答なかった場合、強制終了
@@ -143,80 +133,63 @@ public class Main {
         try{
             Thread.sleep(500);
         }catch (InterruptedException e){
+            timer.cancel();
+            return false;
+        }
+        timer.cancel();
+
+        if(readString.length() == 0){
             return false;
         }
 
-        if(readString.isEmpty()){
-            return false;
-        }
-
-        String lastStr = readString.toString().substring(readString.length() - 1);
-        if(lastStr.equals(">")){
+        String lastStr = readString.toString().trim();
+        if(lastStr.contains(">")){
             return true;
         }
-
-        String okResponseCheck = readString.toString().substring(0, 2);
-        return okResponseCheck.equals("OK");
+        return lastStr.startsWith("OK");
     };
 
     private byte[] sendCarCommand(SerialPort port, String command){
         String fullCommand =  command + "\r";
         port.writeBytes(fullCommand.getBytes(StandardCharsets.UTF_8), fullCommand.length());
 
-        ArrayList<Byte> carResult = new ArrayList<Byte>();
-        Timer time = new Timer();
-        TimerTask task = new TimerTask() {
-            private int executionCount = 0;
+        long startTime = System.currentTimeMillis();
+        while(port.bytesAvailable() == 0){
 
-            @Override
-            public void run() {
-                if(port.bytesAvailable() == -1){
-                    return;
-                }
-
-                portBuffer = new byte[port.bytesAvailable()];
-                int readResult = port.readBytes(portBuffer, carResult.size());
-                if(readResult == -1){
-                    return;
-                }
-
-                //100msかかって返答なかった場合、強制終了
-                if(executionCount >= 100){
-                    cancel();
-                }
-                executionCount++;
+            // 1秒以上経過したらnullを返却して終了させる
+            if(System.currentTimeMillis() - startTime > 1000){
+                System.out.println("タイムアウトしました");
+                return null;
             }
-        };
-        time.scheduleAtFixedRate(task, 10, 1);
-
-        try{
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            try{
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
         }
 
-        String lastStr = portBuffer.toString().substring(portBuffer.length - 1);
-        if(lastStr.equals(">")) {
-            return portBuffer;
-        }
+        portBuffer = new byte[port.bytesAvailable()];
+        port.readBytes(portBuffer, portBuffer.length);
         return portBuffer;
     };
 
-    private String writeErrorMessage(Exception e){
+    private void writeErrorMessage(Exception e){
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss.SSS");
+        String nl = System.lineSeparator();
+        String ts = java.time.LocalDateTime.now().format(dtf);
         StringBuilder errorMessage = new StringBuilder();
 
-        errorMessage.append("\r");
-        errorMessage.append("--------------" + "\r");
-        errorMessage.append("TIMESTAMP: " + dtf + "\r");
-        errorMessage.append("LEVEL: ERROR" + "\r");
-        errorMessage.append("MESSAGE" + e.getMessage() + "\r");
+        errorMessage.append(nl)
+            .append("--------------").append(nl)
+            .append("TIMESTAMP: ").append(ts).append(nl)
+            .append("LEVEL: ERROR").append(nl)
+            .append("MESSAGE: ").append(e.getMessage()).append(nl);
         for(StackTraceElement element : e.getStackTrace()) {
-            errorMessage.append("at" + element.getClassName() + "." + element.getMethodName()
-                + "(" + element.getFileName() + ":" + element.getLineNumber() + ")" + "\r");
+            errorMessage.append("at ")
+                    .append(element.getClassName()).append(".").append(element.getMethodName())
+                    .append("(").append(element.getFileName()).append(":").append(element.getLineNumber()).append(")")
+                    .append(nl);
         }
-        errorMessage.append("\r");
-
-        return errorMessage.toString();
+        System.err.println(errorMessage.toString());
     };
 };
