@@ -36,7 +36,7 @@ public class Main {
 
         //try-with-resourcesで事前に書き込み用ファイルを指定
         try (FileWriter file = new FileWriter(
-                "/Users/kawaguchiryou/Projects/files/carSpeed.csv"
+                "/home/kawaguchiryou/Projects/files/carSpeed.csv"
         )) {
             System.out.println("ポートを開きました。ELM327を初期化します");
 
@@ -75,7 +75,8 @@ public class Main {
                     for (int i = 0; i + 2 < carData.length; i++){
                         if("41".equals(carData[i]) && "0D".equals(carData[i + 1])){
                             int speedKmh = Integer.parseInt(carData[i + 2], 16);
-                            pw.println(speedKmh);
+                            String timestamp = java.time.LocalDateTime.now().toString();
+                            pw.println(timestamp + "," + speedKmh);
                             break;
                         }
                     }
