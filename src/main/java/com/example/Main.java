@@ -54,9 +54,14 @@ public class Main {
             return;
         }
 
+        // ホームディレクトリを取得
+        String homeDir = System.getProperty("user.home");
+        // ログ保存用フォルダのパスを作成
+        String logPath = homeDir + "/obd_logs/carSpeed.csv";
+
         // try-with-resourcesで事前に書き込み用ファイルを指定
         try (FileWriter file = new FileWriter(
-                "carSpeed.csv")) {
+                logPath)) {
             System.out.println("ポートを開きました。ELM327を初期化します");
 
             // ELM327を初期化
